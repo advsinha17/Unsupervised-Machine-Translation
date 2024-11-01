@@ -22,7 +22,7 @@ class UNMTDataset(Dataset):
     
     def _tokenize_line(self, line):
         split_line = line.split()
-        tokenized_line = self.tokenizer(split_line, is_split_into_words = True, return_tensors = 'pt')
+        tokenized_line = self.tokenizer(split_line, is_split_into_words = True)
         word_idx = tokenized_line.word_ids()
         return tokenized_line, word_idx
     
@@ -80,6 +80,7 @@ class UNMTDataset(Dataset):
         noisy_input_ids = self._add_noise(tokenized_line, word_idx)
 
         return input_ids, attention_mask, noisy_input_ids, line['text'], word_idx
+
     
 
 def data_collate(batch, tokenizer):
@@ -90,3 +91,4 @@ def data_collate(batch, tokenizer):
     word_idx = [item[4] for item in batch]
 
     return input_ids, attention_mask, noisy_input_ids, orig_sentence, word_idx
+
