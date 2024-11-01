@@ -1,3 +1,6 @@
+# the pickled token files
+decoder_tokens/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
