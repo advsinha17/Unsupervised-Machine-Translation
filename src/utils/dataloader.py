@@ -22,7 +22,7 @@ class UNMTDataset(Dataset):
     
     def _tokenize_line(self, line):
         split_line = line.split()
-        tokenized_line = self.tokenizer(split_line, is_split_into_words = True)
+        tokenized_line = self.tokenizer(split_line, is_split_into_words = True, return_tensors = 'pt')
         word_idx = tokenized_line.word_ids()
         return tokenized_line, word_idx
     
