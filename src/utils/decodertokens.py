@@ -51,7 +51,12 @@ class UNMTDecoderTokens():
         file_path = os.path.join(self.subfolder_name, f"{self.lang}_decoder_tokens_list.pkl")
 
         with open(file_path, 'wb') as f:
-            pickle.dump(sorted(self.token_set), f)
+            data = {
+                'token_set': sorted(self.token_set),
+                'id_to_tokenizer': self.id_to_tokenizer,
+                'tokenizer_to_id': self.tokenizer_to_id
+            }
+            pickle.dump(data, f)
 
         return len(self.token_set)
     
@@ -59,6 +64,9 @@ class UNMTDecoderTokens():
     def load_token_list(self):
         file_path = os.path.join(self.subfolder_name, f"{self.lang}_decoder_tokens_list.pkl")
         with open(file_path, 'rb') as f:
-            self.token_set = pickle.load(f)
+            data = pickle.load(f)
+            self.token_set = set(data['token_set'])
+            self.id_to_tokenizer = data['id_to_tokenizer']
+            self.tokenizer_to_id = data['tokenizer_to_id']
         
-        return self.token_set
+        return self.token_set, self.id_to_tokenizer, self.tokenizer_to_id
