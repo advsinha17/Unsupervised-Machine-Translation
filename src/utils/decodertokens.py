@@ -16,9 +16,12 @@ class UNMTDecoderTokens():
         self.token_set = set()
         self.subfolder_name = "decoder_tokens"
         self.max_examples = 1000000
+        self.id_to_tokenizer = {} # maps local id to tokenizer id
+        self.tokenizer_to_id = {} # maps tokenizer id to local id 
 
     def _process_data(self):
         print(type(self.dataset))
+        current_id = 0
         with tqdm(desc=f"Processing train", unit=" examples", ncols=80) as pbar:
             for example in self.dataset:
                 if pbar.n >= self.max_examples:
@@ -27,6 +30,11 @@ class UNMTDecoderTokens():
                 split_sentence = sentence.split()
                 tokenized_line = self.tokenizer(split_sentence, is_split_into_words=True)
                 self.token_set.update(tokenized_line['input_ids'])
+                for input_id in tokenized_line['input_ids']:
+                    if input_id not in self.tokenizer_to_id:
+                        self.tokenizer_to_id[input_id] = current_id
+                        self.id_to_tokenizer[current_id] = input_id
+                        current_id += 1
                 pbar.update(1)
         
         # for example in tqdm(self.dataset, desc=f"Processing train", unit="examples", ncols=80):
