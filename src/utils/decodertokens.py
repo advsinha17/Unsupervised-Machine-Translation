@@ -4,7 +4,7 @@ import os
 import pickle
 from tqdm import tqdm
 
-class UNMTDecoderTokens():
+class UNMTDecoderTokens:
     def __init__(self, tokenizer: BertTokenizerFast, lang: str):
         assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
         
@@ -18,10 +18,12 @@ class UNMTDecoderTokens():
         self.max_examples = 1000000
         self.id_to_tokenizer = {} # maps local id to tokenizer id
         self.tokenizer_to_id = {} # maps tokenizer id to local id 
+        self.id_to_tokenizer[self.tokenizer.pad_token_id] = self.tokenizer.pad_token_id
+        self.tokenizer_to_id[self.tokenizer.pad_token_id] = self.tokenizer.pad_token_id
 
     def _process_data(self):
         print(type(self.dataset))
-        current_id = 0
+        current_id = 1
         with tqdm(desc=f"Processing train", unit=" examples", ncols=80) as pbar:
             for example in self.dataset:
                 if pbar.n >= self.max_examples:
