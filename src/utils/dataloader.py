@@ -5,7 +5,8 @@ from transformers import BertTokenizerFast
 import random
 
 class UNMTDataset(Dataset):
-    def __init__(self, tokenizer: BertTokenizerFast, lang: str, size: int = 10000, shuffle_k: int = 3, p_drop: float = 0.1):
+    def __init__(self, tokenizer: BertTokenizerFast, lang: str, 
+                 size: int = 10000, shuffle_k: int = 3, p_drop: float = 0.1):
         super(UNMTDataset, self).__init__()
         assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
         dataset = load_dataset("statmt/cc100", lang = lang, split = "train", streaming = True, trust_remote_code = True)
@@ -66,8 +67,7 @@ class UNMTDataset(Dataset):
             if group:
                 noisy_tokenized_line.extend(group)
 
-        noisy_tokenized_line = torch.tensor(noisy_tokenized_line).unsqueeze(0)
-        
+        noisy_tokenized_line = torch.tensor(noisy_tokenized_line)
         return noisy_tokenized_line # returned as a tensor
         
 
@@ -75,11 +75,12 @@ class UNMTDataset(Dataset):
         line = self.data[idx]
         tokenized_line, word_idx = self._tokenize_line(line['text'])
 
-        input_ids = torch.tensor(tokenized_line['input_ids'])
-        attention_mask = torch.tensor(tokenized_line['attention_mask'])
+        input_ids = tokenized_line['input_ids'].squeeze(0) #squeezing to remove the first dimension. That will be added by the dataloader.
+        attention_mask = tokenized_line['attention_mask'].squeeze(0)
         noisy_input_ids = self._add_noise(tokenized_line, word_idx)
+        noisy_attention_mask = torch.ones_like(noisy_input_ids)
 
-        return input_ids, attention_mask, noisy_input_ids, line['text'], word_idx
+        return input_ids, attention_mask, noisy_input_ids, noisy_attention_mask, line['text'], word_idx
 
     
 
@@ -87,8 +88,9 @@ def data_collate(batch, tokenizer):
     input_ids = torch.nn.utils.rnn.pad_sequence([item[0] for item in batch], batch_first=True, padding_value=tokenizer.pad_token_id)
     attention_mask = torch.nn.utils.rnn.pad_sequence([item[1] for item in batch], batch_first=True, padding_value=0)
     noisy_input_ids = torch.nn.utils.rnn.pad_sequence([item[2] for item in batch], batch_first=True, padding_value=tokenizer.pad_token_id)
-    orig_sentence = [item[3] for item in batch]
-    word_idx = [item[4] for item in batch]
+    noisy_attention_mask = torch.nn.utils.rnn.pad_sequence([item[3] for item in batch], batch_first=True, padding_value=0)
+    orig_sentence = [item[4] for item in batch]
+    word_idx = [item[5] for item in batch]
 
-    return input_ids, attention_mask, noisy_input_ids, orig_sentence, word_idx
+    return input_ids, attention_mask, noisy_input_ids, noisy_attention_mask,orig_sentence, word_idx
 

@@ -9,7 +9,7 @@ class UNMTDecoderTokens:
         assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
         
         self.dataset = load_dataset("statmt/cc100", lang = lang, split = 'train', streaming = True, trust_remote_code = True)
-        print(f"Dataset loaded: {self.dataset}")
+        #print(f"Dataset loaded: {self.dataset}")
         
         self.tokenizer = tokenizer
         self.lang = lang
@@ -22,7 +22,9 @@ class UNMTDecoderTokens:
         self.tokenizer_to_id[self.tokenizer.pad_token_id] = self.tokenizer.pad_token_id
 
     def _process_data(self):
-        print(type(self.dataset))
+
+        #print(type(self.dataset))
+
         current_id = 1
         with tqdm(desc=f"Processing train", unit=" examples", ncols=80) as pbar:
             for example in self.dataset:
@@ -39,12 +41,7 @@ class UNMTDecoderTokens:
                         current_id += 1
                 pbar.update(1)
         
-        # for example in tqdm(self.dataset, desc=f"Processing train", unit="examples", ncols=80):
-        #     sentence = example['text']
-        #     split_sentence = sentence.split()
-        #     tokenized_line = self.tokenizer(split_sentence, is_split_into_words = True)
-        #     self.token_set.update(tokenized_line['input_ids'])
-
+        
     def create_token_list(self):
         self._process_data()
         if not os.path.exists(self.subfolder_name):
@@ -62,9 +59,9 @@ class UNMTDecoderTokens:
 
         return len(self.token_set)
     
-    #this function returns a list
+    #this function returns a list, so, self.token_set now is actually a list
     def load_token_list(self):
-        file_path = os.path.join(self.subfolder_name, f"{self.lang}_decoder_tokens_list.pkl")
+        file_path = os.path.join(os.path.dirname(__file__),self.subfolder_name, f"{self.lang}_decoder_tokens_list.pkl")
         with open(file_path, 'rb') as f:
             data = pickle.load(f)
             self.token_set = set(data['token_set'])
