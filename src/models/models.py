@@ -1,7 +1,22 @@
 import torch
 import torch.nn as nn
-from transformers import BertTokenizerFast
+from transformers import BertTokenizerFast, BertModel
 from src.utils.decodertokens import UNMTDecoderTokens
+
+class UNMTEncoder(nn.Module):
+    def __init__(self, bert_pretrained_type: str = 'bert-base-multilingual-cased'):
+        '''
+            bert_pretrained_type: str, type of bert model to use
+            output_dim: int, dimension of output of encoder
+        '''
+        super(UNMTEncoder, self).__init__()
+        self.bert = BertModel.from_pretrained(bert_pretrained_type)
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
+        
+        x =  self.bert(input_ids, attention_mask = attention_mask)
+        x = x.last_hidden_state
+        return x # returns (batch, seqlen, 768)
 
 class LSTM_ATTN_Decoder(nn.Module):
     def __init__(self, lang:str , tokenizer: BertTokenizerFast, embedding_layer: torch.nn.modules.sparse.Embedding,
@@ -82,15 +97,15 @@ class LSTM_ATTN_Decoder(nn.Module):
                 attn_scores = []
                 for i in range(seq_len1):
                     
-                    attn_input = torch.cat((x[:, i, :], h[-1]), dim = 1)  # h[-1] is the hidden state from last layer
+                    attn_input = torch.cat((x[:, i, :], h[-1]), dim = 1).to(self.device)  # h[-1] is the hidden state from last layer
                     #attn_input has the shape [batch, embedding_dim + hidden_dim]
 
                     attn_scores.append(self.Attention_MLP(attn_input)) # seq_len1 no of elements appended to the list; of shape [batch_size, 1]
 
-                attn_scores_tensor = torch.stack(attn_scores, dim = 1) #[batch_size, seq_len1, 1]
-                attn_scores_tensor = self.softmax_layer(attn_scores_tensor)
+                attn_scores_tensor = torch.stack(attn_scores, dim = 1).to(self.device) #[batch_size, seq_len1, 1]
+                attn_scores_tensor = self.softmax_layer(attn_scores_tensor).to(self.device)
 
-                context_vector = torch.sum(attn_scores_tensor * x, dim = 1) #[batch_size, embedding_dim]
+                context_vector = torch.sum(attn_scores_tensor * x, dim = 1).to(self.device) #[batch_size, embedding_dim]
 
                 if t==0 or g_truth:
                     current_intput_token = target_seq[:, t] #[batch_size]
@@ -151,3 +166,56 @@ class LSTM_ATTN_Decoder(nn.Module):
         outputs = torch.stack(outputs, dim = 1)
 
         return outputs
+
+class SEQ2SEQ(nn.Module):
+    def __init__(self, tokenizer: BertTokenizerFast, bert_pretrained_type:str = 'bert-base-multilingual-cased', mode:str = 'Train',
+                 decoder_hidden_dim:int = 768):
+        super(SEQ2SEQ, self).__init__()
+        self.mode = mode
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.encoder = UNMTEncoder(bert_pretrained_type = bert_pretrained_type)
+        self.embedding_layer = self.encoder.bert.embeddings.word_embeddings.to(self.device)
+
+        self.decoder_en = LSTM_ATTN_Decoder(lang = 'en', tokenizer = tokenizer, 
+                                     embedding_layer = self.embedding_layer, mode=self.mode,
+                                     hidden_dim = decoder_hidden_dim)
+        self.decoder_hi = LSTM_ATTN_Decoder(lang = 'hi', tokenizer = tokenizer, 
+                                     embedding_layer = self.embedding_layer, mode=self.mode,
+                                     hidden_dim = decoder_hidden_dim)
+        self.decoder_te = LSTM_ATTN_Decoder(lang = 'te', tokenizer = tokenizer,
+                                     embedding_layer = self.embedding_layer, mode=self.mode,
+                                     hidden_dim = decoder_hidden_dim)
+        
+        
+    def forward(self, language:int ,
+                input_ids: torch.Tensor, attention_mask: torch.Tensor, 
+                noisy_input_ids: torch.Tensor = None, noisy_attention_mask = None, 
+                g_truth: bool = False):
+        #language is 0 for en, 1 for hi and 2 for te
+        if self.mode == 'Train':
+            assert noisy_input_ids is not None, "noisy_input_ids must be provided in Train mode"
+            assert noisy_attention_mask is not None, "noisy_attention_mask must be provided in Train mode"
+
+            #so the noisy is actually the input to the encoder in this case.
+
+            encoder_output = self.encoder(noisy_input_ids, attention_mask = noisy_attention_mask)
+            
+            if language == 0:
+                decoder_output = self.decoder_en(encoder_output, target_seq = input_ids, g_truth = g_truth)
+            elif language ==1:
+                decoder_output = self.decoder_hi(encoder_output, target_seq = input_ids, g_truth = g_truth)
+            else:
+                decoder_output = self.decoder_te(encoder_output, target_seq = input_ids, g_truth = g_truth)
+
+            return decoder_output
+        
+        if self.mode == 'Test':
+            encoder_output = self.encoder(input_ids, attention_mask = attention_mask)
+            if language == 0:
+                decoder_output = self.decoder_en(encoder_output)
+            elif language ==1:
+                decoder_output = self.decoder_hi(encoder_output)
+            else:
+                decoder_output = self.decoder_te(encoder_output)
+
+            return decoder_output
