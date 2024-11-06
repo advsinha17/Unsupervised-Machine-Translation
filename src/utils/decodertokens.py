@@ -47,7 +47,7 @@ class UNMTDecoderTokens:
         if not os.path.exists(self.subfolder_name):
             os.makedirs(self.subfolder_name)
         
-        file_path = os.path.join(self.subfolder_name, f"{self.lang}_decoder_tokens_list.pkl")
+        file_path = os.path.join(os.path.dirname(__file__),self.subfolder_name, f"{self.lang}_decoder_tokens_list.pkl")
 
         with open(file_path, 'wb') as f:
             data = {
@@ -64,7 +64,7 @@ class UNMTDecoderTokens:
         file_path = os.path.join(os.path.dirname(__file__),self.subfolder_name, f"{self.lang}_decoder_tokens_list.pkl")
         with open(file_path, 'rb') as f:
             data = pickle.load(f)
-            self.token_set = set(data['token_set'])
+            self.token_set = list(data['token_set'])
             self.id_to_tokenizer = data['id_to_tokenizer']
             self.tokenizer_to_id = data['tokenizer_to_id']
         
