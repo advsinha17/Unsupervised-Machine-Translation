@@ -190,15 +190,18 @@ class SEQ2SEQ(nn.Module):
     def forward(self, language:int ,
                 input_ids: torch.Tensor, attention_mask: torch.Tensor, 
                 noisy_input_ids: torch.Tensor = None, noisy_attention_mask = None, 
-                g_truth: bool = False):
+                g_truth: bool = False, noisy_input: bool = False):
         #language is 0 for en, 1 for hi and 2 for te
         if self.mode == 'Train':
             assert noisy_input_ids is not None, "noisy_input_ids must be provided in Train mode"
             assert noisy_attention_mask is not None, "noisy_attention_mask must be provided in Train mode"
 
             #so the noisy is actually the input to the encoder in this case.
-
-            encoder_output = self.encoder(noisy_input_ids, attention_mask = noisy_attention_mask)
+            #but we dont want noise for backtranslation so we have a flag for that
+            if(noisy_input):
+                encoder_output = self.encoder(noisy_input_ids, attention_mask = noisy_attention_mask)
+            else:
+                encoder_output = self.encoder(input_ids, attention_mask = attention_mask)
             
             if language == 0:
                 decoder_output = self.decoder_en(encoder_output, target_seq = input_ids, g_truth = g_truth)
