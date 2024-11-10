@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from utils.decodertokens import UNMTDecoderTokens
+from .utils.decodertokens import UNMTDecoderTokens
 
 class ReconstructionLoss:
     def __init__(self, DecoderTokens: UNMTDecoderTokens):
