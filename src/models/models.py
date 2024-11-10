@@ -7,16 +7,17 @@ class UNMTEncoder(nn.Module):
     def __init__(self, bert_pretrained_type: str = 'bert-base-multilingual-cased'):
         '''
             bert_pretrained_type: str, type of bert model to use
-            output_dim: int, dimension of output of encoder
         '''
         super(UNMTEncoder, self).__init__()
         self.bert = BertModel.from_pretrained(bert_pretrained_type)
+        
+        for param in self.bert.parameters():
+            param.requires_grad = False
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
-        
-        x =  self.bert(input_ids, attention_mask = attention_mask)
+        x = self.bert(input_ids, attention_mask=attention_mask)
         x = x.last_hidden_state
-        return x # returns (batch, seqlen, 768)
+        return x  # returns (batch, seqlen, 768)
 
 class LSTM_ATTN_Decoder(nn.Module):
     def __init__(self, lang:str , tokenizer: BertTokenizerFast, embedding_layer: torch.nn.modules.sparse.Embedding,
@@ -193,8 +194,8 @@ class SEQ2SEQ(nn.Module):
                 g_truth: bool = False, noisy_input: bool = False):
         #language is 0 for en, 1 for hi and 2 for te
         if self.mode == 'Train':
-            assert noisy_input_ids is not None, "noisy_input_ids must be provided in Train mode"
-            assert noisy_attention_mask is not None, "noisy_attention_mask must be provided in Train mode"
+            # assert noisy_input_ids is not None, "noisy_input_ids must be provided in Train mode"
+            # assert noisy_attention_mask is not None, "noisy_attention_mask must be provided in Train mode"
 
             #so the noisy is actually the input to the encoder in this case.
             #but we dont want noise for backtranslation so we have a flag for that
