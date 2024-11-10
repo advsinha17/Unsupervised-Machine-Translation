@@ -132,6 +132,7 @@ class Trainer:
                 
 
             print(f"Epoch {epoch + 1} / {epochs}, Reconstruction Loss: {reconstruction_loss}, Backtranslation Loss: {backtranslation_loss}")
+            torch.save(self.model.state_dict(), 'model.pth')
 
 
 
