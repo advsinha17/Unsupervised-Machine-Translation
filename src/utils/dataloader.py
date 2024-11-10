@@ -36,6 +36,9 @@ class UNMTDataset(Dataset):
             grouped_tokens[-1].append(input_ids[idx])
             if (idx< length - 1) and (word_idx[idx]!= word_idx[idx + 1]):
                 grouped_tokens.append([])
+
+        if len(grouped_tokens) < 2:
+            return tokenized_line['input_ids'].squeeze(0)
         
         # to remove the start and end tokens as well as any padding if present
         first_element = grouped_tokens[0]
@@ -69,6 +72,8 @@ class UNMTDataset(Dataset):
 
         noisy_tokenized_line = torch.tensor(noisy_tokenized_line)
         return noisy_tokenized_line # returned as a tensor
+    
+
         
 
     def __getitem__(self, idx):
