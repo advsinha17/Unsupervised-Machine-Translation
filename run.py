@@ -2,12 +2,34 @@ import argparse
 import os
 import json
 
-def load_model_config(config_file):
-    if not os.path.exists(config_file):
-        raise FileNotFoundError(f"Config file not found: {config_file}")
-    with open(config_file, 'r') as f:
-        config = json.load(f)
+def load_model_config(user_config_file, default_config_file='config.json'):
+    with open(default_config_file, 'r') as f:
+        default_config = json.load(f)
+    
+    user_config = {}
+    if user_config_file and os.path.exists(user_config_file):
+        with open(user_config_file, 'r') as f:
+            user_config = json.load(f)
+    else:
+        print(f"Warning: User config file '{user_config_file}' not found. Using default config values.")
+    
+    config = {**default_config, **user_config}
     return config
+
+def validate_config(config):
+    if 'num_langs' not in config or 'langs' not in config:
+        raise ValueError("Config file must contain 'num_langs' and 'langs'")
+    
+    num_langs = config['num_langs']
+    langs = config['langs']
+    dataset_sizes = config.get('dataset_sizes', [10000] * num_langs)
+
+    if num_langs != len(langs):
+        raise ValueError(f"num_langs ({num_langs}) does not match the number of languages ({len(langs)})")
+    if dataset_sizes and num_langs != len(dataset_sizes):
+        raise ValueError(f"num_langs ({num_langs}) does not match the number of dataset sizes ({len(dataset_sizes)})")
+
+    config['dataset_sizes'] = dataset_sizes
 
 
 def get_parser():
@@ -31,6 +53,7 @@ def get_parser():
         if args.config is None:
             parser.error("Config file must be specified by -config in train mode")
         config = load_model_config(args.config)
+        validate_config(config)
 
     elif args.mode == 'test':
         if args.src is None or args.target is None:
