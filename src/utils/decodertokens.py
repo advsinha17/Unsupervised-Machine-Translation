@@ -1,11 +1,11 @@
 from datasets import load_dataset
-from transformers import BertTokenizerFast
+from transformers import XLMRobertaTokenizerFast
 import os
 import pickle
 from tqdm import tqdm
 
 class UNMTDecoderTokens:
-    def __init__(self, tokenizer: BertTokenizerFast, lang: str):
+    def __init__(self, tokenizer: XLMRobertaTokenizerFast, lang: str):
         assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
         
         self.dataset = load_dataset("statmt/cc100", lang = lang, split = 'train', streaming = True, trust_remote_code = True)
@@ -31,8 +31,7 @@ class UNMTDecoderTokens:
                 if pbar.n >= self.max_examples:
                     break
                 sentence = example['text']
-                split_sentence = sentence.split()
-                tokenized_line = self.tokenizer(split_sentence, is_split_into_words=True)
+                tokenized_line = self.tokenizer(sentence)
                 self.token_set.update(tokenized_line['input_ids'])
                 for input_id in tokenized_line['input_ids']:
                     if input_id not in self.tokenizer_to_id:
