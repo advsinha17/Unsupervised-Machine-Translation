@@ -179,15 +179,6 @@ class SEQ2SEQ(nn.Module):
                                      embedding_layer = self.embedding_layer,
                                      hidden_dim = decoder_hidden_dim))
 
-        # self.decoder_en = LSTM_ATTN_Decoder(lang = 'en', tokenizer = tokenizer, 
-        #                              embedding_layer = self.embedding_layer, mode=self.mode,
-        #                              hidden_dim = decoder_hidden_dim)
-        # self.decoder_hi = LSTM_ATTN_Decoder(lang = 'hi', tokenizer = tokenizer, 
-        #                              embedding_layer = self.embedding_layer, mode=self.mode,
-        #                              hidden_dim = decoder_hidden_dim)
-        # self.decoder_te = LSTM_ATTN_Decoder(lang = 'te', tokenizer = tokenizer,
-        #                              embedding_layer = self.embedding_layer, mode=self.mode,
-        #                              hidden_dim = decoder_hidden_dim)
         
         
     def forward(self, language:int ,
@@ -205,24 +196,10 @@ class SEQ2SEQ(nn.Module):
                 encoder_output = self.encoder(input_ids, attention_mask = attention_mask)
             
             decoder_output = self.decoders[language](encoder_output, target_seq = input_ids, g_truth = g_truth)
-            
-            # if language == 0:
-            #     decoder_output = self.decoder_en(encoder_output, target_seq = input_ids, g_truth = g_truth)
-            # elif language ==1:
-            #     decoder_output = self.decoder_hi(encoder_output, target_seq = input_ids, g_truth = g_truth)
-            # else:
-            #     decoder_output = self.decoder_te(encoder_output, target_seq = input_ids, g_truth = g_truth)
-
             return decoder_output
         
         else:
             encoder_output = self.encoder(input_ids, attention_mask = attention_mask)
             decoder_output = self.decoders[language](encoder_output, target_seq = input_ids, g_truth = g_truth)
-            # if language == 0:
-            #     decoder_output = self.decoder_en(encoder_output)
-            # elif language ==1:
-            #     decoder_output = self.decoder_hi(encoder_output)
-            # else:
-            #     decoder_output = self.decoder_te(encoder_output)
 
             return decoder_output
