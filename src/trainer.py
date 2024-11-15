@@ -3,13 +3,13 @@ import torch
 from torch import nn
 from .loss import ReconstructionLoss
 from .utils.decodertokens import UNMTDecoderTokens
-from transformers import BertTokenizerFast
+from transformers import XLMRobertaTokenizerFast
 from itertools import zip_longest
 from tqdm import tqdm
 from .models.models import SEQ2SEQ
 
 class Trainer:
-    def __init__(self, lang1: DataLoader, lang2: DataLoader, lang3: DataLoader, tokenizer: BertTokenizerFast, lr: float = 0.0003): 
+    def __init__(self, lang1: DataLoader, lang2: DataLoader, lang3: DataLoader, tokenizer: XLMRobertaTokenizerFast, lr: float = 0.0003): 
         self.lang1 = lang1 # anchor language
         self.lang2 = lang2
         self.lang3 = lang3

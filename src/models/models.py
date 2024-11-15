@@ -1,26 +1,26 @@
 import torch
 import torch.nn as nn
-from transformers import BertTokenizerFast, BertModel
+from transformers import XLMRobertaTokenizerFast, XLMRobertaModel
 from src.utils.decodertokens import UNMTDecoderTokens
 
 class UNMTEncoder(nn.Module):
-    def __init__(self, bert_pretrained_type: str = 'bert-base-multilingual-cased'):
+    def __init__(self, pretrained_type: str = 'xlm-roberta-base'):
         '''
-            bert_pretrained_type: str, type of bert model to use
+            pretrained_type: str, type of xlmr model to use
         '''
         super(UNMTEncoder, self).__init__()
-        self.bert = BertModel.from_pretrained(bert_pretrained_type)
+        self.xlmr = XLMRobertaModel.from_pretrained(pretrained_type)
         
-        for param in self.bert.parameters():
+        for param in self.xlmr.parameters():
             param.requires_grad = False
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
-        x = self.bert(input_ids, attention_mask=attention_mask)
+        x = self.xlmr(input_ids, attention_mask=attention_mask)
         x = x.last_hidden_state
         return x  # returns (batch, seqlen, 768)
 
 class LSTM_ATTN_Decoder(nn.Module):
-    def __init__(self, lang:str , tokenizer: BertTokenizerFast, embedding_layer: torch.nn.modules.sparse.Embedding,
+    def __init__(self, lang:str , tokenizer: XLMRobertaTokenizerFast, embedding_layer: torch.nn.modules.sparse.Embedding,
                  mode:str = 'Train',
                  max_output_length:int = 500 , dropout_rate:float = 0.3 ,num_layers:int = 3,
                  embedding_dim: int = 768, hidden_dim:int = 1024):
@@ -169,13 +169,13 @@ class LSTM_ATTN_Decoder(nn.Module):
         return outputs
 
 class SEQ2SEQ(nn.Module):
-    def __init__(self, tokenizer: BertTokenizerFast, bert_pretrained_type:str = 'bert-base-multilingual-cased', mode:str = 'Train',
+    def __init__(self, tokenizer: XLMRobertaTokenizerFast, pretrained_type:str = 'xlm-roberta-base', mode:str = 'Train',
                  decoder_hidden_dim:int = 768):
         super(SEQ2SEQ, self).__init__()
         self.mode = mode
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.encoder = UNMTEncoder(bert_pretrained_type = bert_pretrained_type)
-        self.embedding_layer = self.encoder.bert.embeddings.word_embeddings.to(self.device)
+        self.encoder = UNMTEncoder(pretrained_type = pretrained_type)
+        self.embedding_layer = self.encoder.xlmr.embeddings.word_embeddings.to(self.device)
 
         self.decoder_en = LSTM_ATTN_Decoder(lang = 'en', tokenizer = tokenizer, 
                                      embedding_layer = self.embedding_layer, mode=self.mode,

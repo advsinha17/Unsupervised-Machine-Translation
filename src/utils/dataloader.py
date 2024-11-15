@@ -1,11 +1,11 @@
 import torch
 from datasets import load_dataset
 from torch.utils.data import Dataset
-from transformers import BertTokenizerFast
+from transformers import XLMRobertaTokenizerFast
 import random
 
 class UNMTDataset(Dataset):
-    def __init__(self, tokenizer: BertTokenizerFast, lang: str, 
+    def __init__(self, tokenizer: XLMRobertaTokenizerFast, lang: str, 
                  size: int = 10000, shuffle_k: int = 3, p_drop: float = 0.1):
         super(UNMTDataset, self).__init__()
         assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
@@ -22,8 +22,7 @@ class UNMTDataset(Dataset):
         return self.size
     
     def _tokenize_line(self, line):
-        split_line = line.split()
-        tokenized_line = self.tokenizer(split_line, is_split_into_words=True, return_tensors='pt', truncation=True, max_length=self.max_seq_len)
+        tokenized_line = self.tokenizer(line, return_tensors='pt', truncation=True, max_length=self.max_seq_len)
         word_idx = tokenized_line.word_ids()
         return tokenized_line, word_idx
     
