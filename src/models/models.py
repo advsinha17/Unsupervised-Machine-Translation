@@ -21,18 +21,14 @@ class UNMTEncoder(nn.Module):
 
 class LSTM_ATTN_Decoder(nn.Module):
     def __init__(self, lang:str , tokenizer: XLMRobertaTokenizerFast, embedding_layer: torch.nn.modules.sparse.Embedding,
-                 mode:str = 'Train',
                  max_output_length:int = 500 , dropout_rate:float = 0.3 ,num_layers:int = 3,
                  embedding_dim: int = 768, hidden_dim:int = 1024):
         
-        assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
-
         super(LSTM_ATTN_Decoder, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.embedding_layer = embedding_layer
 
-        self.mode = mode # either 'Train' or 'Test'
         self.lang = lang
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
@@ -85,7 +81,7 @@ class LSTM_ATTN_Decoder(nn.Module):
 
         outputs = []
 
-        if self.mode == 'Train':
+        if self.training:
             
             assert target_seq is not None, "target_seq must be provided in Train mode"
             
@@ -126,7 +122,7 @@ class LSTM_ATTN_Decoder(nn.Module):
 
                 outputs.append(pred_prob_softmax)
 
-        elif self.mode == 'Test':
+        else:
 
             for t in range(self.max_output_length):
                 
@@ -169,34 +165,38 @@ class LSTM_ATTN_Decoder(nn.Module):
         return outputs
 
 class SEQ2SEQ(nn.Module):
-    def __init__(self, tokenizer: XLMRobertaTokenizerFast, pretrained_type:str = 'xlm-roberta-base', mode:str = 'Train',
+    def __init__(self, tokenizer: XLMRobertaTokenizerFast, list_of_target_languages:list, pretrained_type:str = 'xlm-roberta-base',
                  decoder_hidden_dim:int = 768):
         super(SEQ2SEQ, self).__init__()
-        self.mode = mode
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.encoder = UNMTEncoder(pretrained_type = pretrained_type)
         self.embedding_layer = self.encoder.xlmr.embeddings.word_embeddings.to(self.device)
+        self.list_of_target_languages = list_of_target_languages
+        self.decoders = nn.ModuleList()
 
-        self.decoder_en = LSTM_ATTN_Decoder(lang = 'en', tokenizer = tokenizer, 
-                                     embedding_layer = self.embedding_layer, mode=self.mode,
-                                     hidden_dim = decoder_hidden_dim)
-        self.decoder_hi = LSTM_ATTN_Decoder(lang = 'hi', tokenizer = tokenizer, 
-                                     embedding_layer = self.embedding_layer, mode=self.mode,
-                                     hidden_dim = decoder_hidden_dim)
-        self.decoder_te = LSTM_ATTN_Decoder(lang = 'te', tokenizer = tokenizer,
-                                     embedding_layer = self.embedding_layer, mode=self.mode,
-                                     hidden_dim = decoder_hidden_dim)
+        for idx, lang in enumerate(list_of_target_languages):
+            self.decoders.append(LSTM_ATTN_Decoder(lang = lang, tokenizer = tokenizer, 
+                                     embedding_layer = self.embedding_layer,
+                                     hidden_dim = decoder_hidden_dim))
+
+        # self.decoder_en = LSTM_ATTN_Decoder(lang = 'en', tokenizer = tokenizer, 
+        #                              embedding_layer = self.embedding_layer, mode=self.mode,
+        #                              hidden_dim = decoder_hidden_dim)
+        # self.decoder_hi = LSTM_ATTN_Decoder(lang = 'hi', tokenizer = tokenizer, 
+        #                              embedding_layer = self.embedding_layer, mode=self.mode,
+        #                              hidden_dim = decoder_hidden_dim)
+        # self.decoder_te = LSTM_ATTN_Decoder(lang = 'te', tokenizer = tokenizer,
+        #                              embedding_layer = self.embedding_layer, mode=self.mode,
+        #                              hidden_dim = decoder_hidden_dim)
         
         
     def forward(self, language:int ,
                 input_ids: torch.Tensor, attention_mask: torch.Tensor, 
                 noisy_input_ids: torch.Tensor = None, noisy_attention_mask = None, 
                 g_truth: bool = False, noisy_input: bool = False):
-        #language is 0 for en, 1 for hi and 2 for te
-        if self.mode == 'Train':
-            # assert noisy_input_ids is not None, "noisy_input_ids must be provided in Train mode"
-            # assert noisy_attention_mask is not None, "noisy_attention_mask must be provided in Train mode"
-
+        #for example: language is 0 for en, 1 for hi and 2 for te and so on
+        if self.training:
+            
             #so the noisy is actually the input to the encoder in this case.
             #but we dont want noise for backtranslation so we have a flag for that
             if(noisy_input):
@@ -204,22 +204,25 @@ class SEQ2SEQ(nn.Module):
             else:
                 encoder_output = self.encoder(input_ids, attention_mask = attention_mask)
             
-            if language == 0:
-                decoder_output = self.decoder_en(encoder_output, target_seq = input_ids, g_truth = g_truth)
-            elif language ==1:
-                decoder_output = self.decoder_hi(encoder_output, target_seq = input_ids, g_truth = g_truth)
-            else:
-                decoder_output = self.decoder_te(encoder_output, target_seq = input_ids, g_truth = g_truth)
+            decoder_output = self.decoders[language](encoder_output, target_seq = input_ids, g_truth = g_truth)
+            
+            # if language == 0:
+            #     decoder_output = self.decoder_en(encoder_output, target_seq = input_ids, g_truth = g_truth)
+            # elif language ==1:
+            #     decoder_output = self.decoder_hi(encoder_output, target_seq = input_ids, g_truth = g_truth)
+            # else:
+            #     decoder_output = self.decoder_te(encoder_output, target_seq = input_ids, g_truth = g_truth)
 
             return decoder_output
         
-        if self.mode == 'Test':
+        else:
             encoder_output = self.encoder(input_ids, attention_mask = attention_mask)
-            if language == 0:
-                decoder_output = self.decoder_en(encoder_output)
-            elif language ==1:
-                decoder_output = self.decoder_hi(encoder_output)
-            else:
-                decoder_output = self.decoder_te(encoder_output)
+            decoder_output = self.decoders[language](encoder_output, target_seq = input_ids, g_truth = g_truth)
+            # if language == 0:
+            #     decoder_output = self.decoder_en(encoder_output)
+            # elif language ==1:
+            #     decoder_output = self.decoder_hi(encoder_output)
+            # else:
+            #     decoder_output = self.decoder_te(encoder_output)
 
             return decoder_output
