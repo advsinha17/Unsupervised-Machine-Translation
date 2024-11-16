@@ -1,6 +1,14 @@
 import argparse
 import os
 import json
+from datasets import load_dataset
+from src.utils.decodertokens import UNMTDecoderTokens
+from src.utils.dataloader import UNMTDataset, data_collate
+from transformers import XLMRobertaTokenizerFast
+from torch.utils.data import DataLoader
+import torch
+from src.models.models import SEQ2SEQ
+from src.trainer import Trainer
 
 def load_model_config(user_config_file, default_config_file='config.json'):
     with open(default_config_file, 'r') as f:
@@ -23,6 +31,7 @@ def validate_config(config):
     num_langs = config['num_langs']
     langs = config['langs']
     dataset_sizes = config.get('dataset_sizes', [10000] * num_langs)
+    decoder_tokens_sizes = config.get('decoder_tokens_size', [100000] * num_langs)
 
     if num_langs != len(langs):
         raise ValueError(f"num_langs ({num_langs}) does not match the number of languages ({len(langs)})")
@@ -30,23 +39,69 @@ def validate_config(config):
         raise ValueError(f"num_langs ({num_langs}) does not match the number of dataset sizes ({len(dataset_sizes)})")
 
     config['dataset_sizes'] = dataset_sizes
+    config['decoder_tokens_size'] = decoder_tokens_sizes
 
+def load_lang_data(lang, lang_path, dataset_size, tokens_size):
+    if lang_path:
+        if not os.path.exists(lang_path):
+            raise FileNotFoundError(f"Language dataset not found at '{lang_path}'")
+        with open(lang_path, 'r') as file:
+            data = file.read().splitlines()
+        return data[:dataset_size], data[:tokens_size]
+    else:
+        try:
+            dataset = load_dataset("statmt/cc100", lang = lang, split = "train", streaming = True, trust_remote_code = True)
+            dl_texts = dataset.take(dataset_size)
+            dt_texts = dataset.take(tokens_size)
+            dl_data = []
+            dt_data = []
+            for item in dl_texts:
+                dl_data.append(item['text'])
+            for item in dt_texts:
+                dt_data.append(item['text'])
+            return dl_data, dt_data
+            
+        except Exception as e:
+            raise ValueError(f"Could not load dataset for language '{lang}'. Please ensure it is a valid language from https://huggingface.co/datasets/statmt/cc100.")
+        
+def get_model_list():
+    if not os.path.isdir('trained_models/'):
+        os.makedirs('trained_models/')
+    return os.listdir('trained_models/')
+
+
+def check_model_exists(src, tgt, models):
+    for model in models:
+        model_langs = model.split('.')[0]
+        model_langs = model_langs.split('_')
+        if src in model_langs and tgt in model_langs:
+            return model
+    return None
 
 def get_parser():
     parser = argparse.ArgumentParser(description = 'Machine Translation System')
     parser.add_argument('-mode', choices = ['train', 'test'], required = True, help = 'train or test mode')
 
-    parser.add_argument('-src', type = str, help = "Source language code (eg. 'en' for English, 'hi' for Hindi)")
-    parser.add_argument('-tgt', type = str, help = "Target language code (eg. 'en' for English, 'hi' for Hindi)")
-
 
     parser.add_argument('-config', type = str, default = 'config.json', help = "Path to model config file for training")
+    parser.add_argument('-language_paths', nargs='*', help="""Paths to language datasets, one per language in the order language names are specified in the config file. If not provided for a language, the cc100 dataset for the language will be used if available.
+                        If number of paths exceeds number of languages, the extra paths will be ignored.""")
 
-
-    parser.add_argument('-load_model', type = str, default = 'model.pth', help = "Path to load trained model")
+    models = get_model_list()
+    parser.add_argument('-src', type = str, help = f"""Source language code. Both source and target language codes must have a model trained on them. All trained models: {models}. 
+                        A language code is the text before each underscore in the model name (eg. a model named en_hi_te can translate between any 2 of en (English), hi (Hindi) and te (Telugu)).""")
+    parser.add_argument('-tgt', type = str, help = f"""Target language code. Both source and target language codes must have a model trained on them. All trained models: {models}. 
+                        A language code is the text before each underscore in the model name (eg. a model named en_hi_te can translate between any 2 of en (English), hi (Hindi) and te (Telugu)).""")
+    parser.add_argument('-load_model', type = str, default = 'trained_models/en_hi_te.pth', help = "Path to load trained model")
+    parser.add_argument('text', type = str, help = 'Text to be translated.')
+    parser.add_argument('text_file', type = str, help = 'Path to file containing text to be translated.')
+    parser.add_argument('save_file_path', type = str, default = 'Path to save the translated text.')
 
     
+    return parser
 
+def run():
+    parser = get_parser()
     args = parser.parse_args()
 
     if args.mode == 'train':
@@ -54,17 +109,68 @@ def get_parser():
             parser.error("Config file must be specified by -config in train mode")
         config = load_model_config(args.config)
         validate_config(config)
+        dataloaders = []
+        tokenizer = XLMRobertaTokenizerFast.from_pretrained('xlm-roberta-base')
+        for i, lang in enumerate(config['langs']):
+            lang_path = args.lanuage_paths[i] if i < len(args.lanuage_paths) else None
+            dl_data, dt_data = load_lang_data(lang, lang_path)
+            decoder_tokens = UNMTDecoderTokens(dt_data, tokenizer, lang, config['decoder_tokens_size'][i])
+            if not os.path.exists(f'src/utils/decoder_tokens/{lang}_decoder_tokens_list.pkl'):
+                _ = decoder_tokens.create_token_list()
+            dataset = UNMTDataset(tokenizer, dl_data, lang, size = config['dataset_sizes'][i])
+            dataloader = DataLoader(dataset, batch_size = config['batch_size'], collate_fn = lambda x: data_collate(x, tokenizer))
+            dataloaders.append(dataloader)
+        trainer = Trainer(dataloaders, tokenizer, lr = config['lr'])
+        model = SEQ2SEQ(tokenizer, config['langs'])
+        trainer.train(model, config['epochs'])
+        print("Model trained successfully.")
+
 
     elif args.mode == 'test':
-        if args.src is None or args.target is None:
-            parser.error("Source and target languages must be specified by -src and -target in test mode")
-    return parser
+        if args.src is None or args.tgt is None:
+            parser.error("Source and target languages must be specified by -src and -tgt in test mode")
+        
+        if not args.text and not args.text_file:
+            parser.error("Either -text or -text_file must be provided in test mode")
+        
+        if args.text:
+            print(f"Translating text: {args.text}")
+            text_to_translate = args.text
+        else:
+            if not os.path.exists(args.text_file):
+                raise parser.error('One of -text or -text_file must be specified')
+            with open(args.text_file, 'r') as file:
+                text_to_translate = file.read()
+            print(f"Translating text from file: {args.text_file}")
 
+        models = get_model_list()
+        model = check_model_exists(args.src, args.tgt, models)
+        if not model:
+            raise ValueError(f"No model found in 'trained_models/' directory that supports translation between {args.src} and {args.tgt}")
+        tokenizer = XLMRobertaTokenizerFast.from_pretrained('xlm-roberta-base')
+        lang_list = model.split('.')[0].split('_')
+        print(f"Using model: {model}")
+        model = SEQ2SEQ(tokenizer, lang_list) 
+        state_dict = torch.load('trained_models/' + model)
+        model.load_state_dict(state_dict)
+        model.eval()
+        tokenized_text = tokenizer(text_to_translate, return_tensor = 'pt')
+        input_ids = tokenized_text['input_ids'][0].tolist()
+        attention_mask = tokenized_text['attention_mask'][0].tolist()
+        translated_ids = model(lang_list.index(args.tgt), input_ids, attention_mask)
+        translated_ids = torch.argmax(translated_ids, dim=-1).tolist()
+        decoder_tokens = UNMTDecoderTokens(None, tokenizer, args.tgt)
+        decoder_tokens.load_token_list()
+        translated_ids = [decoder_tokens.id_to_tokenizer.get(tid, tokenizer.pad_token_id) for tid in translated_ids]
+        translated_text = tokenizer.decode(translated_ids, skip_special_tokens=True)
+        if not args.save_file_path:
+            print(f"Translated text: {translated_text}")
+        else:
+            with open(args.save_file_path, 'w') as file:
+                file.write(translated_text)
+            print(f"Translated text saved to: {args.save_file_path}")
+            
 
-def run():
-    # TODO
-
-    pass
 
 
 

@@ -8,12 +8,13 @@ class UNMTDataset(Dataset):
     def __init__(self, tokenizer: XLMRobertaTokenizerFast, lang: str, 
                  size: int = 10000, shuffle_k: int = 3, p_drop: float = 0.1):
         super(UNMTDataset, self).__init__()
-        assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
-        dataset = load_dataset("statmt/cc100", lang = lang, split = "train", streaming = True, trust_remote_code = True)
-        self.data = list(dataset.take(size))
+        # dataset = load_dataset("statmt/cc100", lang = lang, split = "train", streaming = True, trust_remote_code = True)
+        # self.data = list(dataset.take(size))
+        self.data = data
         self.size = size
         self.tokenizer = tokenizer
         self.lang = lang
+        self.max_seq_len = max_seq_len
 
         self.shuffle_k = shuffle_k #how much to shuffle the tokens
         self.p_drop = p_drop #probability of dropping a token
@@ -46,7 +47,6 @@ class UNMTDataset(Dataset):
         del grouped_tokens[0]
         del grouped_tokens[-1]
 
-        
         shuffler_list = [i + random.uniform(0, self.shuffle_k) for i in range(len(grouped_tokens))]
         
         paired = list(zip(grouped_tokens, shuffler_list))
@@ -77,24 +77,22 @@ class UNMTDataset(Dataset):
 
     def __getitem__(self, idx):
         line = self.data[idx]
-        tokenized_line, word_idx = self._tokenize_line(line['text'])
+        tokenized_line, word_idx = self._tokenize_line(line)
+        # tokenized_line, word_idx = self._tokenize_line(line['text'])
 
         input_ids = tokenized_line['input_ids'].squeeze(0) #squeezing to remove the first dimension. That will be added by the dataloader.
         attention_mask = tokenized_line['attention_mask'].squeeze(0)
         noisy_input_ids = self._add_noise(tokenized_line, word_idx)
         noisy_attention_mask = torch.ones_like(noisy_input_ids)
 
-        return input_ids, attention_mask, noisy_input_ids, noisy_attention_mask, line['text'], word_idx
-
-    
+        return input_ids, attention_mask, noisy_input_ids, noisy_attention_mask, line, word_idx
 
 def data_collate(batch, tokenizer):
-    input_ids = torch.nn.utils.rnn.pad_sequence([item[0] for item in batch], batch_first=True, padding_value=tokenizer.pad_token_id)
-    attention_mask = torch.nn.utils.rnn.pad_sequence([item[1] for item in batch], batch_first=True, padding_value=0)
-    noisy_input_ids = torch.nn.utils.rnn.pad_sequence([item[2] for item in batch], batch_first=True, padding_value=tokenizer.pad_token_id)
-    noisy_attention_mask = torch.nn.utils.rnn.pad_sequence([item[3] for item in batch], batch_first=True, padding_value=0)
+    input_ids = torch.nn.utils.rnn.pad_sequence([item[0][:50] for item in batch], batch_first=True, padding_value=tokenizer.pad_token_id)
+    attention_mask = torch.nn.utils.rnn.pad_sequence([item[1][:50] for item in batch], batch_first=True, padding_value=0)
+    noisy_input_ids = torch.nn.utils.rnn.pad_sequence([item[2][:50] for item in batch], batch_first=True, padding_value=tokenizer.pad_token_id)
+    noisy_attention_mask = torch.nn.utils.rnn.pad_sequence([item[3][:50] for item in batch], batch_first=True, padding_value=0)
     orig_sentence = [item[4] for item in batch]
     word_idx = [item[5] for item in batch]
 
-    return input_ids, attention_mask, noisy_input_ids, noisy_attention_mask,orig_sentence, word_idx
-
+    return input_ids, attention_mask, noisy_input_ids, noisy_attention_mask, orig_sentence, word_idx

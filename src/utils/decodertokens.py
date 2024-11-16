@@ -8,14 +8,14 @@ class UNMTDecoderTokens:
     def __init__(self, tokenizer: XLMRobertaTokenizerFast, lang: str):
         assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
         
-        self.dataset = load_dataset("statmt/cc100", lang = lang, split = 'train', streaming = True, trust_remote_code = True)
+        # self.dataset = load_dataset("statmt/cc100", lang = lang, split = 'train', streaming = True, trust_remote_code = True)
         #print(f"Dataset loaded: {self.dataset}")
-        
+        self.dataset =  data
         self.tokenizer = tokenizer
         self.lang = lang
         self.token_set = set()
         self.subfolder_name = "decoder_tokens"
-        self.max_examples = 1000000
+        self.max_examples = max_examples
         self.id_to_tokenizer = {} # maps local id to tokenizer id
         self.tokenizer_to_id = {} # maps tokenizer id to local id 
         self.id_to_tokenizer[self.tokenizer.pad_token_id] = self.tokenizer.pad_token_id
@@ -23,14 +23,12 @@ class UNMTDecoderTokens:
 
     def _process_data(self):
 
-        #print(type(self.dataset))
-
         current_id = 1
         with tqdm(desc=f"Processing train", unit=" examples", ncols=80) as pbar:
             for example in self.dataset:
                 if pbar.n >= self.max_examples:
                     break
-                sentence = example['text']
+                sentence = example
                 tokenized_line = self.tokenizer(sentence)
                 self.token_set.update(tokenized_line['input_ids'])
                 for input_id in tokenized_line['input_ids']:
