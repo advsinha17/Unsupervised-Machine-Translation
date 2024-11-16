@@ -21,7 +21,7 @@ class UNMTEncoder(nn.Module):
 
 class LSTM_ATTN_Decoder(nn.Module):
     def __init__(self, lang:str , tokenizer: XLMRobertaTokenizerFast, embedding_layer: torch.nn.modules.sparse.Embedding,
-                 max_output_length:int = 500 , dropout_rate:float = 0.3 ,num_layers:int = 3,
+                 max_output_length:int = 50 , dropout_rate:float = 0.3 ,num_layers:int = 3,
                  embedding_dim: int = 768, hidden_dim:int = 1024):
         
         super(LSTM_ATTN_Decoder, self).__init__()
@@ -43,7 +43,8 @@ class LSTM_ATTN_Decoder(nn.Module):
         self.decoderTokens.load_token_list()
         self.decoderTokens.token_set = torch.tensor(self.decoderTokens.token_set).to(self.device) #1D tensor of valid tokens
         
-        
+        self.beam_width = 3
+        self.beam_length_norm = 0.7
         self.no_output_tokens = self.decoderTokens.token_set.size(dim = 0)
         self.max_output_length = max_output_length #maximum length of output sequence
         
@@ -121,51 +122,118 @@ class LSTM_ATTN_Decoder(nn.Module):
                 prev_pred_tokens = self.decoderTokens.token_set[prev_pred_token_indices] #[batch_size, embedding_dim]
 
                 outputs.append(pred_prob_softmax)
+            
+            outputs = torch.stack(outputs, dim = 1)
+
+            return outputs
+
 
         else:
-
+            beams = [(torch.zeros((batch_size, 0)).long().to(self.device), torch.zeros(batch_size).to(self.device), h, c)]  # (seq, score, hidden, cell)
+            # seq is [batch,current_seq_len]
+            # score is [batch]
             for t in range(self.max_output_length):
-                
-                attn_scores = []
-                for i in range(seq_len1):
+                print("current value of t is:",t)
+                new_beams = []
+
+                for(seq, score, h, c) in beams:
+                    attn_scores = []
+                    for i in range(seq_len1):
+                        
+                        attn_input = torch.cat((x[:, i, :], h[-1]), dim = 1)  # h[-1] is the hidden state from last layer
+                        #attn_input has the shape [batch, embedding_dim + hidden_dim]
+
+                        attn_scores.append(self.Attention_MLP(attn_input)) # seq_len1 no of elements appended to the list; of shape [batch_size, 1]
+
+                    attn_scores_tensor = torch.stack(attn_scores, dim = 1) #[batch_size, seq_len1, 1]
+                    attn_scores_tensor = self.softmax_layer(attn_scores_tensor)
+
+                    context_vector = torch.sum(attn_scores_tensor * x, dim = 1) #[batch_size, embedding_dim]
+
+                    if t==0:
+                        current_intput_token =torch.tensor([self.start_token_id]*batch_size).to(self.device) #[batch_size]
+                        current_input = self.embedding_layer(current_intput_token).to(self.device) #[batch_size, embedding_dim]
+                    else:
+                        #takes the last tokens in seq for the whole batch
+                        prev_pred_tokens = self.decoderTokens.token_set[seq[:,-1]] #[batch_size, embedding_dim]
+                        current_input = self.embedding_layer(prev_pred_tokens).to(self.device)  #[batch_size, embedding_dim]
+
+                    lstm_input = torch.cat((current_input, context_vector), dim = 1).unsqueeze(1) #[batch_size, 1 ,2*embedding_dim]
+
+                    lstm_output, (h,c) = self.LSTM(lstm_input, (h,c))
+
+                    pred_prob = self.fc_final(lstm_output.squeeze(1)) #[batch_size, no_output_tokens]
+                    pred_prob_softmax = self.softmax_layer(pred_prob) #[batch_size, no_output_tokens]
+                    #but pred_prob_softmax is actually the logSoftmax
+                    #for beam search we require normal softmax.
+                    pred_prob_softmax = torch.exp(pred_prob_softmax)
+
+                    top_k_probs, top_k_indices = torch.topk(pred_prob_softmax, self.beam_width, dim=-1) # [batch, beam_width]
+                    # print("top_k_probs.shape is ", top_k_probs.shape)
+                    # print("top_k_indices.shape is ", top_k_indices.shape)
+                    for i in range(self.beam_width):
+                        new_seq = torch.cat([seq, top_k_indices[:,i].unsqueeze(1)],dim = 1)
+                        new_length = new_seq.size(1)
+                        penalty = ((5+new_length)/6)**self.beam_length_norm
+                        new_score = score + torch.log(top_k_probs[:,i]+self.epsilon)/penalty
+                        assert not torch.isnan(new_score).any(), "NaN values found in score"
+                        #new_score = score + torch.log(top_k_probs[:,i])
+                        new_beams.append((new_seq, new_score, h, c))
+    
                     
-                    attn_input = torch.cat((x[:, i, :], h[-1]), dim = 1)  # h[-1] is the hidden state from last layer
-                    #attn_input has the shape [batch, embedding_dim + hidden_dim]
+                    # now we have to select the top beam_width beams
+                    # the beam width candidates are selected independantly for each sample in the batch
+                    # so we rank and filter each sample in the batch separately and then rejoin them
 
-                    attn_scores.append(self.Attention_MLP(attn_input)) # seq_len1 no of elements appended to the list; of shape [batch_size, 1]
+                    top_beams_per_sample = [[] for _ in range(batch_size)]
 
-                attn_scores_tensor = torch.stack(attn_scores, dim = 1) #[batch_size, seq_len1, 1]
-                attn_scores_tensor = self.softmax_layer(attn_scores_tensor)
+                    #first grouping beams by samples in a batch
+                    for beam in new_beams:
+                        seq, score, hidden, cell = beam
+                        for batch_idx in range(batch_size):
+                            top_beams_per_sample[batch_idx].append((seq[batch_idx], score[batch_idx], hidden[:,batch_idx,:], cell[:,batch_idx,:]))
+                    for batch_idx in range(batch_size):
+                        top_beams_per_sample[batch_idx] = sorted(top_beams_per_sample[batch_idx], key=lambda x: x[1], reverse=True)[:self.beam_width]
+            
+                    #top_beams_per_sample[batch_idx] is a list of tuples of the form (seq, score, hidden, cell)  of the corresponding batch index
+                    
+                    merged_seqs = [[] for _ in range(self.beam_width)]
+                    merged_scores = [[] for _ in range(self.beam_width)]
+                    merged_hiddens = [[] for _ in range(self.beam_width)]
+                    merged_cells = [[] for _ in range(self.beam_width)]
 
-                context_vector = torch.sum(attn_scores_tensor * x, dim = 1) #[batch_size, embedding_dim]
+                    for batch_idx, batch_element in enumerate(top_beams_per_sample):
+                        for beam_idx, beam in enumerate(batch_element):
+                            merged_seqs[beam_idx].append(beam[0].unsqueeze(0))
+                            merged_scores[beam_idx].append(beam[1].unsqueeze(0))
+                            merged_hiddens[beam_idx].append(beam[2].unsqueeze(1))
+                            merged_cells[beam_idx].append(beam[3].unsqueeze(1))
+                            
+                    for i in range(self.beam_width):
+                      merged_seqs[i] = torch.cat(merged_seqs[i], dim=0)
+                      merged_scores[i] = torch.cat(merged_scores[i], dim=0)
+                      merged_hiddens[i] = torch.cat(merged_hiddens[i], dim=1)
+                      merged_cells[i] = torch.cat(merged_cells[i], dim=1)
 
-                if t==0:
-                    current_intput_token =torch.tensor([self.start_token_id]*batch_size).to(self.device) #[batch_size]
-                    current_input = self.embedding_layer(current_intput_token).to(self.device) #[batch_size, embedding_dim]
-                else:
-                    current_input = self.embedding_layer(prev_pred_tokens).to(self.device)  #[batch_size, embedding_dim]
+                    beams.clear()
+                    for i in range(self.beam_width):
+                        beams.append((merged_seqs[i], merged_scores[i], merged_hiddens[i], merged_cells[i]))
+                    
+            output = []
+            for batch_idx in range(batch_size):
+              maxi = float('-inf')
+              for beam_idx in range(self.beam_width):
+                if(beams[beam_idx][1][batch_idx].item() > maxi):
+                  maxi = beams[beam_idx][1][batch_idx]
+                  output.append(beams[beam_idx][0][batch_idx].unsqueeze(0))
+            
+            output = torch.cat(output, dim=0)
 
-                lstm_input = torch.cat((current_input, context_vector), dim = 1).unsqueeze(1) #[batch_size, 1 ,2*embedding_dim]
+            return output
 
-                lstm_output, (h,c) = self.LSTM(lstm_input, (h,c))
-
-                pred_prob = self.fc_final(lstm_output.squeeze(1)) #[batch_size, no_output_tokens]
-                pred_prob_softmax = self.softmax_layer(pred_prob)
-
-                prev_pred_token_indices = pred_prob_softmax.argmax(dim = 1) #[batch_size]
-                prev_pred_tokens = self.decoderTokens.token_set[prev_pred_token_indices] #[batch_size, embedding_dim]
-
-                outputs.append(pred_prob_softmax)
-
-                if(prev_pred_tokens == self.end_token_id).all():
-                    break
-        
-        outputs = torch.stack(outputs, dim = 1)
-
-        return outputs
-
+   
 class SEQ2SEQ(nn.Module):
-    def __init__(self, tokenizer: XLMRobertaTokenizerFast, list_of_target_languages:list, pretrained_type:str = 'xlm-roberta-base',
+    def __init__(self, tokenizer: XLMRobertaTokenizerFast, list_of_target_languages:list, pretrained_type:str = 'xlm-roberta-base',max_output_length:int = 50,
                  decoder_hidden_dim:int = 768):
         super(SEQ2SEQ, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -176,11 +244,9 @@ class SEQ2SEQ(nn.Module):
 
         for idx, lang in enumerate(list_of_target_languages):
             self.decoders.append(LSTM_ATTN_Decoder(lang = lang, tokenizer = tokenizer, 
-                                     embedding_layer = self.embedding_layer,
+                                     embedding_layer = self.embedding_layer,max_output_length = max_output_length,
                                      hidden_dim = decoder_hidden_dim))
 
-        
-        
     def forward(self, language:int ,
                 input_ids: torch.Tensor, attention_mask: torch.Tensor, 
                 noisy_input_ids: torch.Tensor = None, noisy_attention_mask = None, 
@@ -200,6 +266,5 @@ class SEQ2SEQ(nn.Module):
         
         else:
             encoder_output = self.encoder(input_ids, attention_mask = attention_mask)
-            decoder_output = self.decoders[language](encoder_output, target_seq = input_ids, g_truth = g_truth)
-
+            decoder_output = self.decoders[language](encoder_output)
             return decoder_output
