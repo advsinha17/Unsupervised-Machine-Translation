@@ -39,7 +39,7 @@ class LSTM_ATTN_Decoder(nn.Module):
         self.start_token_id = self.tokenizer.cls_token_id
         self.end_token_id = self.tokenizer.sep_token_id
 
-        self.decoderTokens = UNMTDecoderTokens(tokenizer = self.tokenizer, lang = lang)
+        self.decoderTokens = UNMTDecoderTokens(None, tokenizer = self.tokenizer, lang = lang)
         self.decoderTokens.load_token_list()
         self.decoderTokens.token_set = torch.tensor(self.decoderTokens.token_set).to(self.device) #1D tensor of valid tokens
         

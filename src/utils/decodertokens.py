@@ -5,8 +5,7 @@ import pickle
 from tqdm import tqdm
 
 class UNMTDecoderTokens:
-    def __init__(self, tokenizer: XLMRobertaTokenizerFast, lang: str):
-        assert lang in ['en', 'te', 'hi'], "lang must be one of 'en', 'te', or 'hi'"
+    def __init__(self, data, tokenizer: XLMRobertaTokenizerFast, lang: str, max_examples: int = 100000):
         
         # self.dataset = load_dataset("statmt/cc100", lang = lang, split = 'train', streaming = True, trust_remote_code = True)
         #print(f"Dataset loaded: {self.dataset}")

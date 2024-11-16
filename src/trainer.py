@@ -15,7 +15,7 @@ class Trainer:
 
         for i in range(self.n_langs):
             setattr(self, f"lang{i + 1}", langs[i])
-            setattr(self, f"decoder_tokens{i + 1}", UNMTDecoderTokens(langs[i].dataset.tokenizer, langs[i].dataset.lang))
+            setattr(self, f"decoder_tokens{i + 1}", UNMTDecoderTokens(None, langs[i].dataset.tokenizer, langs[i].dataset.lang))
             getattr(self, f"decoder_tokens{i + 1}").load_token_list()
             setattr(self, f"reconstruction_loss{i + 1}", ReconstructionLoss(getattr(self, f"decoder_tokens{i + 1}")))
 
@@ -25,6 +25,7 @@ class Trainer:
         self.lr = lr
         self.model = None
         self.optimizer = None
+        self.save_path = 'trained_models/' + '_'.join([langs[i].dataset.lang for i in range(self.n_langs)])
 
     def map_argmax_to_tokenizer_id(self, argmax_tensor, decoder_tokens):
         mapped_tensor = argmax_tensor.clone()
@@ -106,7 +107,7 @@ class Trainer:
                 
 
             print(f"Epoch {epoch + 1} / {epochs}, Reconstruction Loss: {reconstruction_loss}, Backtranslation Loss: {backtranslation_loss}")
-            torch.save(self.model.state_dict(), 'model.pth')
+            torch.save(self.model.state_dict(), self.save_path)
 
 
 

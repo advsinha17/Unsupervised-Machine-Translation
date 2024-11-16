@@ -5,8 +5,8 @@ from transformers import XLMRobertaTokenizerFast
 import random
 
 class UNMTDataset(Dataset):
-    def __init__(self, tokenizer: XLMRobertaTokenizerFast, lang: str, 
-                 size: int = 10000, shuffle_k: int = 3, p_drop: float = 0.1):
+    def __init__(self, data: list, tokenizer: XLMRobertaTokenizerFast, lang: str, 
+                 size: int = 10000, shuffle_k: int = 3, p_drop: float = 0.1, max_seq_len: int = 50):
         super(UNMTDataset, self).__init__()
         # dataset = load_dataset("statmt/cc100", lang = lang, split = "train", streaming = True, trust_remote_code = True)
         # self.data = list(dataset.take(size))
