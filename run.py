@@ -202,9 +202,15 @@ def run():
             raise FileNotFoundError(f"Source text file not found at '{args.src_text_path}'")
         if not os.path.exists(args.tgt_text_path):
             raise FileNotFoundError(f"Target text file not found at '{args.tgt_text_path}'")
-
-        models = get_model_list()
-        model = check_model_exists(args.src, args.tgt, models)
+        if not args.load_model:
+            models = get_model_list()
+            model = check_model_exists(args.src, args.tgt, models)
+        else:
+            model = args.load_model
+            model = model.split('/')[-1]
+            langs = model.split('.').split('_')
+            if args.src not in langs or args.tgt not in langs:
+                raise ValueError(f"Model at '{args.load_model}' does not support translation between {args.src} and {args.tgt}")
         if not model:
             raise ValueError(f"No model found in 'trained_models/' directory that supports translation between {args.src} and {args.tgt}")
         
@@ -218,5 +224,7 @@ def run():
 
 
 if __name__ == '__main__':
+    if not os.path.exists('trained_models/'):
+        os.makedirs('trained_models/')
     run()
 
