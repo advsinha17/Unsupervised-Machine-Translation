@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import XLMRobertaTokenizerFast, XLMRobertaModel
+from torch.nn.utils.rnn import pad_sequence
 from src.utils.decodertokens import UNMTDecoderTokens
 
 class UNMTEncoder(nn.Module):
@@ -45,6 +46,8 @@ class LSTM_ATTN_Decoder(nn.Module):
         
         self.beam_width = 3
         self.beam_length_norm = 0.7
+        self.epsilon = 1e-7
+
         self.no_output_tokens = self.decoderTokens.token_set.size(dim = 0)
         self.max_output_length = max_output_length #maximum length of output sequence
         
@@ -76,13 +79,14 @@ class LSTM_ATTN_Decoder(nn.Module):
         prev_pred_tokens = None #initially None and later gets updated with the previous predicted token values
         # prev_pred_token shape is [batch_size]
 
-        #initializing LSTM hidden and cell states
-        h = torch.zeros(self.num_layers, batch_size, self.hidden_dim ).to(self.device)
-        c = torch.zeros(self.num_layers, batch_size, self.hidden_dim ).to(self.device)
-
         outputs = []
 
         if self.training:
+
+            #initializing LSTM hidden and cell states
+            h = torch.zeros(self.num_layers, batch_size, self.hidden_dim ).to(self.device)
+            c = torch.zeros(self.num_layers, batch_size, self.hidden_dim ).to(self.device)
+
             
             assert target_seq is not None, "target_seq must be provided in Train mode"
             
@@ -127,109 +131,78 @@ class LSTM_ATTN_Decoder(nn.Module):
 
             return outputs
 
-
         else:
-            beams = [(torch.zeros((batch_size, 0)).long().to(self.device), torch.zeros(batch_size).to(self.device), h, c)]  # (seq, score, hidden, cell)
-            # seq is [batch,current_seq_len]
-            # score is [batch]
-            for t in range(self.max_output_length):
-                print("current value of t is:",t)
-                new_beams = []
-
-                for(seq, score, h, c) in beams:
-                    attn_scores = []
-                    for i in range(seq_len1):
-                        
-                        attn_input = torch.cat((x[:, i, :], h[-1]), dim = 1)  # h[-1] is the hidden state from last layer
-                        #attn_input has the shape [batch, embedding_dim + hidden_dim]
-
-                        attn_scores.append(self.Attention_MLP(attn_input)) # seq_len1 no of elements appended to the list; of shape [batch_size, 1]
-
-                    attn_scores_tensor = torch.stack(attn_scores, dim = 1) #[batch_size, seq_len1, 1]
-                    attn_scores_tensor = self.softmax_layer(attn_scores_tensor)
-
-                    context_vector = torch.sum(attn_scores_tensor * x, dim = 1) #[batch_size, embedding_dim]
-
-                    if t==0:
-                        current_intput_token =torch.tensor([self.start_token_id]*batch_size).to(self.device) #[batch_size]
-                        current_input = self.embedding_layer(current_intput_token).to(self.device) #[batch_size, embedding_dim]
-                    else:
-                        #takes the last tokens in seq for the whole batch
-                        prev_pred_tokens = self.decoderTokens.token_set[seq[:,-1]] #[batch_size, embedding_dim]
-                        current_input = self.embedding_layer(prev_pred_tokens).to(self.device)  #[batch_size, embedding_dim]
-
-                    lstm_input = torch.cat((current_input, context_vector), dim = 1).unsqueeze(1) #[batch_size, 1 ,2*embedding_dim]
-
-                    lstm_output, (h,c) = self.LSTM(lstm_input, (h,c))
-
-                    pred_prob = self.fc_final(lstm_output.squeeze(1)) #[batch_size, no_output_tokens]
-                    pred_prob_softmax = self.softmax_layer(pred_prob) #[batch_size, no_output_tokens]
-                    #but pred_prob_softmax is actually the logSoftmax
-                    #for beam search we require normal softmax.
-                    pred_prob_softmax = torch.exp(pred_prob_softmax)
-
-                    top_k_probs, top_k_indices = torch.topk(pred_prob_softmax, self.beam_width, dim=-1) # [batch, beam_width]
-                    # print("top_k_probs.shape is ", top_k_probs.shape)
-                    # print("top_k_indices.shape is ", top_k_indices.shape)
-                    for i in range(self.beam_width):
-                        new_seq = torch.cat([seq, top_k_indices[:,i].unsqueeze(1)],dim = 1)
-                        new_length = new_seq.size(1)
-                        penalty = ((5+new_length)/6)**self.beam_length_norm
-                        new_score = score + torch.log(top_k_probs[:,i]+self.epsilon)/penalty
-                        assert not torch.isnan(new_score).any(), "NaN values found in score"
-                        #new_score = score + torch.log(top_k_probs[:,i])
-                        new_beams.append((new_seq, new_score, h, c))
-    
-                    
-                    # now we have to select the top beam_width beams
-                    # the beam width candidates are selected independantly for each sample in the batch
-                    # so we rank and filter each sample in the batch separately and then rejoin them
-
-                    top_beams_per_sample = [[] for _ in range(batch_size)]
-
-                    #first grouping beams by samples in a batch
-                    for beam in new_beams:
-                        seq, score, hidden, cell = beam
-                        for batch_idx in range(batch_size):
-                            top_beams_per_sample[batch_idx].append((seq[batch_idx], score[batch_idx], hidden[:,batch_idx,:], cell[:,batch_idx,:]))
-                    for batch_idx in range(batch_size):
-                        top_beams_per_sample[batch_idx] = sorted(top_beams_per_sample[batch_idx], key=lambda x: x[1], reverse=True)[:self.beam_width]
             
-                    #top_beams_per_sample[batch_idx] is a list of tuples of the form (seq, score, hidden, cell)  of the corresponding batch index
-                    
-                    merged_seqs = [[] for _ in range(self.beam_width)]
-                    merged_scores = [[] for _ in range(self.beam_width)]
-                    merged_hiddens = [[] for _ in range(self.beam_width)]
-                    merged_cells = [[] for _ in range(self.beam_width)]
-
-                    for batch_idx, batch_element in enumerate(top_beams_per_sample):
-                        for beam_idx, beam in enumerate(batch_element):
-                            merged_seqs[beam_idx].append(beam[0].unsqueeze(0))
-                            merged_scores[beam_idx].append(beam[1].unsqueeze(0))
-                            merged_hiddens[beam_idx].append(beam[2].unsqueeze(1))
-                            merged_cells[beam_idx].append(beam[3].unsqueeze(1))
-                            
-                    for i in range(self.beam_width):
-                      merged_seqs[i] = torch.cat(merged_seqs[i], dim=0)
-                      merged_scores[i] = torch.cat(merged_scores[i], dim=0)
-                      merged_hiddens[i] = torch.cat(merged_hiddens[i], dim=1)
-                      merged_cells[i] = torch.cat(merged_cells[i], dim=1)
-
-                    beams.clear()
-                    for i in range(self.beam_width):
-                        beams.append((merged_seqs[i], merged_scores[i], merged_hiddens[i], merged_cells[i]))
-                    
-            output = []
             for batch_idx in range(batch_size):
-              maxi = float('-inf')
-              for beam_idx in range(self.beam_width):
-                if(beams[beam_idx][1][batch_idx].item() > maxi):
-                  maxi = beams[beam_idx][1][batch_idx]
-                  output.append(beams[beam_idx][0][batch_idx].unsqueeze(0))
-            
-            output = torch.cat(output, dim=0)
+                #initializing LSTM hidden and cell states
+                h = torch.zeros((self.num_layers, 1, self.hidden_dim ), requires_grad=False).to(self.device) # as we're iterating through a batch sample by sample
+                c = torch.zeros((self.num_layers, 1, self.hidden_dim ), requires_grad=False).to(self.device)
 
-            return output
+                beams = [(torch.zeros((1,0), dtype = torch.long, requires_grad=False).to(self.device), torch.zeros((1),requires_grad=False).to(self.device), h, c)]
+                completed_beams = []
+                # (seq, score, hidden, cell) # seq is [1,current_seq_len] # score is [1]
+                for t in range(self.max_output_length):
+                    new_beams = []
+                    #the 1 in the first dim of everything is for the batch_dim
+                    for(seq, score, h, c) in beams:
+                        attn_scores = []
+                        for i in range(seq_len1):
+                            #print(f"x[{batch_idx}, {i}, :] shape is {x[batch_idx, i, :].shape}, h[-1] shape is {h[-1].shape}")
+                            attn_input = torch.cat((x[batch_idx, i, :].unsqueeze(0), h[-1]), dim = 1)  # h[-1] is the hidden state from last layer
+                            #attn_input has the shape [1, embedding_dim + hidden_dim]
+
+                            attn_scores.append(self.Attention_MLP(attn_input)) # seq_len1 no of elements appended to the list; of shape [1, 1]
+
+                        attn_scores_tensor = torch.stack(attn_scores, dim = 1) #[1, seq_len1, 1]
+                        attn_scores_tensor = self.softmax_layer(attn_scores_tensor)
+
+                        context_vector = torch.sum(attn_scores_tensor * x[batch_idx, :, :].unsqueeze(0), dim = 1) #[1, embedding_dim]
+
+                        if t==0:
+                            current_intput_token =torch.tensor([self.start_token_id]*1).to(self.device) #[1]
+                            current_input = self.embedding_layer(current_intput_token).to(self.device) #[1, embedding_dim]
+                        else:
+                            #takes the last tokens in seq for the whole batch
+                            prev_pred_tokens = self.decoderTokens.token_set[seq[:,-1]] #[1 embedding_dim]
+                            #if the prev_pred_token was the end token then we dont want to use it as input
+                            # we then add it to the completed beams
+                            if prev_pred_tokens[0].item() == self.end_token_id:
+                                completed_beams.append((seq, score, h, c))
+                                continue
+                            current_input = self.embedding_layer(prev_pred_tokens).to(self.device)  #[batch_size, embedding_dim]
+                        #print(f"current_input shape is {current_input.shape}, context_vector shape is {context_vector.shape}")
+                        lstm_input = torch.cat((current_input, context_vector), dim = 1).unsqueeze(1) #[1, 1 ,2*embedding_dim]
+                        lstm_output, (h,c) = self.LSTM(lstm_input, (h,c))
+                        pred_prob = self.fc_final(lstm_output.squeeze(1)) #[1, no_output_tokens]
+                        pred_prob_softmax = self.softmax_layer(pred_prob) #[1, no_output_tokens]
+                        #but pred_prob_softmax is actually the logSoftmax
+                        #for beam search we require normal softmax.
+                        pred_prob_softmax = torch.exp(pred_prob_softmax)
+
+                        top_k_probs, top_k_indices = torch.topk(pred_prob_softmax, self.beam_width, dim=-1) # [batch, beam_width]
+                        # print("top_k_probs.shape is ", top_k_probs.shape)
+                        # print("top_k_indices.shape is ", top_k_indices.shape)
+                        for i in range(self.beam_width):
+                            new_seq = torch.cat([seq, top_k_indices[:,i].unsqueeze(1)],dim = 1)
+                            new_length = new_seq.size(1)
+                            penalty = ((5+new_length)/6)**self.beam_length_norm
+                            new_score = score + torch.log(top_k_probs[:,i]+self.epsilon)/penalty
+                            assert not torch.isnan(new_score).any(), "NaN values found in score"
+                            #new_score = score + torch.log(top_k_probs[:,i])
+                            new_beams.append((new_seq, new_score, h, c))
+
+                    # now we have to select the top beam_width beams
+                    top_beams_per_sample = sorted(new_beams, key=lambda x: x[1], reverse=True)[:self.beam_width]
+                    beams = top_beams_per_sample
+                
+                completed_beams.extend(beams)
+                best_sequence = max(completed_beams, key=lambda x: x[1])
+                outputs.append(best_sequence[0])
+            #now we have a list of tensors of shape [1, sample_seq_len] for each sample in the batch
+            # we need to pad them all to the same length and stack them
+            
+            padded_output = pad_sequence(outputs, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+            return padded_output
 
    
 class SEQ2SEQ(nn.Module):
