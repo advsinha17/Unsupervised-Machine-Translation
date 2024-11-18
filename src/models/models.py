@@ -166,7 +166,7 @@ class LSTM_ATTN_Decoder(nn.Module):
                             prev_pred_tokens = self.decoderTokens.token_set[seq[:,-1]] #[1 embedding_dim]
                             #if the prev_pred_token was the end token then we dont want to use it as input
                             # we then add it to the completed beams
-                            if prev_pred_tokens[0].item() == self.end_token_id:
+                            if prev_pred_tokens[0].item() == self.decoderTokens.tokenizer_to_id[self.tokenizer.eos_token_id]:
                                 completed_beams.append((seq, score, h, c))
                                 continue
                             current_input = self.embedding_layer(prev_pred_tokens).to(self.device)  #[batch_size, embedding_dim]
@@ -197,11 +197,11 @@ class LSTM_ATTN_Decoder(nn.Module):
                 
                 completed_beams.extend(beams)
                 best_sequence = max(completed_beams, key=lambda x: x[1])
-                outputs.append(best_sequence[0])
+                outputs.append(best_sequence[0].squeeze(0))
             #now we have a list of tensors of shape [1, sample_seq_len] for each sample in the batch
             # we need to pad them all to the same length and stack them
-            
-            padded_output = pad_sequence(outputs, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+            # print([tensor.shape for tensor in outputs])]
+            padded_output = pad_sequence(outputs, batch_first=True, padding_value=-1)
             return padded_output
 
    
