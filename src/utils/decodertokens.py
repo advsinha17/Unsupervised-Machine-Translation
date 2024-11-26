@@ -35,6 +35,8 @@ class UNMTDecoderTokens:
         for i, token in enumerate(self.token_set):
             self.tokenizer_to_id[token] = i
             self.id_to_tokenizer[i] = token
+        self.tokenizer_to_id[self.tokenizer.unk_token_id] = len(self.token_set)
+        self.id_to_tokenizer[len(self.token_set)] = self.tokenizer.unk_token_id
         
         
     def create_token_list(self):

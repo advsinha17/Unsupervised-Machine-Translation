@@ -98,7 +98,7 @@ class Trainer:
                                 bt_out = self.map_argmax_to_tokenizer_id(bt_out, getattr(self, f"decoder_tokens{i + 1}"))
                             attn_mask_bt = (bt_out != self.tokenizer.pad_token_id).to(self.device)
                             output_ids_bt = self.model(i, input_ids, attention_mask, bt_out, attn_mask_bt, True, True)
-                            loss_bt = getattr(self, f"reconstruction_loss1").calculate_loss(output_ids_bt, input_ids, attention_mask)
+                            loss_bt = getattr(self, f"reconstruction_loss{i + 1}").calculate_loss(output_ids_bt, input_ids, attention_mask)
                             loss_bt.backward()
                             backtranslation_loss += loss_bt.item()
 
