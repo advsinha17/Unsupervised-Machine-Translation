@@ -101,12 +101,11 @@ def get_parser():
     parser.add_argument('-load_model', type = str, help = "Path to load trained model")
     parser.add_argument('-text', type = str, help = 'Text to be translated.')
     parser.add_argument('-text_file', type = str, help = 'Path to file containing text to be translated.')
-    parser.add_argument('-save_file_path', type = str, default = 'Path to save the translated text.')
+    parser.add_argument('-save_file_path', type = str)
 
     parser.add_argument('-src_text_path', type = str, default = 'data/en.txt', help = 'Path to source language text file for evaluation. Each testing sample should be on a new line.')
     parser.add_argument('-tgt_text_path', type = str, default = 'data/hi.txt', help = 'Path to target language text file for evaluation. Each testing sample should be on a new line.')
 
-    
     return parser
 
 def run():
@@ -114,8 +113,8 @@ def run():
     args = parser.parse_args()
 
     if args.mode == 'train':
-        if args.config is None:
-            parser.error("Config file must be specified by -config in train mode")
+        # if args.config is None:
+        #     parser.error("Config file must be specified by -config in train mode")
         config = load_model_config(args.config)
         validate_config(config)
         dataloaders = []
@@ -155,7 +154,7 @@ def run():
             if not os.path.exists(args.text_file):
                 raise parser.error('One of -text or -text_file must be specified')
             with open(args.text_file, 'r') as file:
-                text_to_translate = file.read()
+                text_to_translate = file.read().split('\n')
             print(f"Translating text from file: {args.text_file}")
         if not args.load_model:
             models = get_model_list()
@@ -171,25 +170,71 @@ def run():
         tokenizer = XLMRobertaTokenizerFast.from_pretrained('xlm-roberta-base')
         lang_list = model.split('.')[0].split('_')
         print(f"Using model: {model}")
-        model = SEQ2SEQ(tokenizer, lang_list) 
-        state_dict = torch.load('trained_models/' + model)
-        model.load_state_dict(state_dict)
-        model.eval()
-        tokenized_text = tokenizer(text_to_translate, return_tensor = 'pt')
-        input_ids = tokenized_text['input_ids'][0].tolist()
-        attention_mask = tokenized_text['attention_mask'][0].tolist()
-        translated_ids = model(lang_list.index(args.tgt), input_ids, attention_mask)
-        # translated_ids = torch.argmax(translated_ids, dim=-1).tolist()
-        decoder_tokens = UNMTDecoderTokens(None, tokenizer, args.tgt)
-        decoder_tokens.load_token_list()
-        translated_ids = [decoder_tokens.id_to_tokenizer.get(tid, tokenizer.pad_token_id) for tid in translated_ids]
-        translated_text = tokenizer.decode(translated_ids, skip_special_tokens=True)
-        if not args.save_file_path:
-            print(f"Translated text: {translated_text}")
+        state_dict = torch.load('trained_models/' + model, map_location=torch.device('cpu'))
+        if (args.text):
+            tokenized_text = tokenizer(text_to_translate, return_tensors = 'pt')
+            input_ids = tokenized_text['input_ids'][0].unsqueeze(0)
+            attention_mask = tokenized_text['attention_mask'][0].unsqueeze(0)
+            model = SEQ2SEQ(tokenizer, lang_list, max_output_length=input_ids.shape[1])
+            model.load_state_dict(state_dict)
+            model.eval()
+            translated_ids = model(lang_list.index(args.tgt), input_ids, attention_mask)
+            decoder_tokens = UNMTDecoderTokens(None, tokenizer, args.tgt)
+            decoder_tokens.load_token_list()
+            translated_tokens = []
+            for token in translated_ids[0]:
+                if token == 1:
+                    break
+                if token == -1:
+                    translated_tokens.append(tokenizer.pad_token_id)
+                    continue
+                translated_tokens.append(decoder_tokens.id_to_tokenizer.get(token.item(), tokenizer.pad_token_id))
+            translated_text = tokenizer.decode(translated_tokens, skip_special_tokens=True)
+            if not args.save_file_path:
+                print(f"Translated text: {translated_text}")
+            else:
+                with open(args.save_file_path, 'w') as file:
+                    file.write(translated_text)
+                print(f"Translated text saved to: {args.save_file_path}")
         else:
-            with open(args.save_file_path, 'w') as file:
-                file.write(translated_text)
-            print(f"Translated text saved to: {args.save_file_path}")
+            model = SEQ2SEQ(tokenizer, lang_list) 
+            model.load_state_dict(state_dict)
+            model.eval()
+            src_decoder_tokens = UNMTDecoderTokens(None, tokenizer, args.src)
+            tgt_decoder_tokens = UNMTDecoderTokens(None, tokenizer, args.tgt)
+            src_decoder_tokens.load_token_list()
+            tgt_decoder_tokens.load_token_list()
+            src_dataset = UNMTDataset(text_to_translate, tokenizer, args.src, size = len(text_to_translate))
+            src_dataloader = DataLoader(src_dataset, batch_size = 8, collate_fn = lambda x: data_collate(x, tokenizer))
+            translations = []
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            with torch.no_grad():
+                for batch in tqdm(src_dataloader):
+                    input_ids, attention_mask, _, _, _, _ = batch
+                    input_ids = input_ids.to(device)
+                    attention_mask = attention_mask.to(device)
+                    translated_ids = model(lang_list.index(args.tgt), input_ids, attention_mask)
+                    for batch in translated_ids:
+                        translated_tokens = []
+                        for token in batch:
+                            if token == 1:
+                                break
+                            if token == -1:
+                                translated_tokens.append(tokenizer.pad_token_id)
+                                continue
+                            translated_tokens.append(tgt_decoder_tokens.id_to_tokenizer.get(token.item(), tokenizer.pad_token_id))
+                        translated_text = tokenizer.decode(translated_tokens, skip_special_tokens=True)
+                        translations.append(translated_text)
+
+            if not args.save_file_path:
+                print("Translated text:")
+                for translation in translations:
+                    print(translation)
+            else:
+                with open(args.save_file_path, 'w') as file:
+                    for translation in translations:
+                        file.write(translation + '\n')
+                print(f"Translated text saved to: {args.save_file_path}")
 
     elif args.mode == 'evaluate':
         if args.src is None or args.tgt is None:
@@ -220,7 +265,7 @@ def run():
             tgt_data = f.read().split('\n')
         assert len(src_data) == len(tgt_data) and len(src_data) > 0, "Source and target text files must have the same number of lines and at least 1 line"
         data_size = len(src_data)
-        print(f"Bleu score: {evaluate(model, args.src, src_data, args.tgt, tgt_data, data_size)}")
+        print(f"Bleu score: {evaluate('trained_models/' + model, args.src, src_data, args.tgt, tgt_data, data_size)}")
 
 
 if __name__ == '__main__':
