@@ -17,7 +17,6 @@ def evaluate(model_path: str, src_lang: str, src_data: list, tgt_lang: str, tgt_
     src_dataset = UNMTDataset(src_data, tokenizer, src_lang, size = data_size)
     src_dataloader = DataLoader(src_dataset, batch_size = 8, collate_fn = lambda x: data_collate(x, tokenizer))
     lang_list = model_path.split('/')[1].split('.')[0].split('_')
-    print(lang_list)
     model = SEQ2SEQ(tokenizer, lang_list)
     state_dict = torch.load(model_path, map_location=torch.device('cpu'))
     model.load_state_dict(state_dict)
@@ -47,7 +46,7 @@ def evaluate(model_path: str, src_lang: str, src_data: list, tgt_lang: str, tgt_
                         continue
                     translated_tokens.append(tgt_decoder_tokens.id_to_tokenizer.get(token.item(), tokenizer.pad_token_id))
                 translated_text = tokenizer.decode(translated_tokens, skip_special_tokens=True)
-                print(translated_text)
+                # print(translated_text)
                 translations.append(translated_text)
 
 
