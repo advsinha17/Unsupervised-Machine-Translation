@@ -7,7 +7,6 @@ import torch
 from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 from datasets import load_dataset
 from tqdm import tqdm
-import json
 
 def evaluate(model_path: str, src_lang: str, src_data: list, tgt_lang: str, tgt_text: list, data_size: int):
     tokenizer = XLMRobertaTokenizerFast.from_pretrained('xlm-roberta-base')
@@ -35,26 +34,8 @@ def evaluate(model_path: str, src_lang: str, src_data: list, tgt_lang: str, tgt_
             input_ids, attention_mask, _, _, _, _ = batch
             input_ids = input_ids.to(device)
             attention_mask = attention_mask.to(device)
-            # print('input_ids: ', input_ids)
             translated_ids = model(lang_list.index(tgt_lang), input_ids, attention_mask)
-            # translated_ids = torch.argmax(translated_ids, dim=-1).tolist()
-            # print(translated_ids.shape)
-
-            # for batch in translated_ids:
-            #     translated_tokens = []
-            #     sent = []
-            #     print(batch)
-            #     prev_token = -100
-            #     for token in batch:
-            #         if token == 1:
-            #             break
-            #         if token == -1 or token == 0:
-            #             continue
-            #         prev_token = token.item()
-            #         sent.append(tokenizer.decode(tgt_decoder_tokens.id_to_tokenizer.get(token.item(), tokenizer.pad_token_id)))
-            #     translated_text = ' '.join(sent)
-            #     print(translated_text)
-            #     translations.append(translated_text)
+    
             
             for batch in translated_ids:
                 translated_tokens = []
