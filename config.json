@@ -1,0 +1,10 @@
+{
+  "num_langs": 3,
+  "langs": ["en", "te", "hi"],
+  "dataset_sizes": [30000, 30000, 30000],
+  "max_sequence_length": 50,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "batch_size": 32,
+  "decoder_tokens_size": [100000, 100000, 100000]
+}
